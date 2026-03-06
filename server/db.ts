@@ -1,7 +1,8 @@
-import { eq } from "drizzle-orm";
+import { eq, and, like } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users } from "../drizzle/schema";
+import { InsertUser, users, topics, quizQuestions, userProgress, userNotes, quizAnswers, Topic, QuizQuestion, UserProgress, UserNote, QuizAnswer, InsertUserProgress, InsertUserNote, InsertQuizAnswer } from "../drizzle/schema";
 import { ENV } from './_core/env';
+
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -89,4 +90,147 @@ export async function getUserByOpenId(openId: string) {
   return result.length > 0 ? result[0] : undefined;
 }
 
-// TODO: add feature queries here as your schema grows.
+// RHCSA Study Platform Queries
+
+export async function getAllTopics(): Promise<Topic[]> {
+  const db = await getDb();
+  if (!db) return [];
+  
+  return await db.select().from(topics).orderBy(topics.subsectionId);
+}
+
+export async function getTopicById(id: number): Promise<Topic | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+  
+  const result = await db.select().from(topics).where(eq(topics.id, id)).limit(1);
+  return result.length > 0 ? result[0] : undefined;
+}
+
+export async function getTopicsBySection(sectionId: string): Promise<Topic[]> {
+  const db = await getDb();
+  if (!db) return [];
+  
+  return await db.select().from(topics).where(eq(topics.sectionId, sectionId)).orderBy(topics.subsectionId);
+}
+
+export async function searchTopics(query: string): Promise<Topic[]> {
+  const db = await getDb();
+  if (!db) return [];
+  
+  const searchPattern = `%${query}%`;
+  return await db.select().from(topics).where(
+    like(topics.searchableText, searchPattern)
+  ).limit(50);
+}
+
+export async function getAllQuizQuestions(): Promise<QuizQuestion[]> {
+  const db = await getDb();
+  if (!db) return [];
+  
+  return await db.select().from(quizQuestions).orderBy(quizQuestions.questionNumber);
+}
+
+export async function getQuizQuestionById(id: number): Promise<QuizQuestion | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+  
+  const result = await db.select().from(quizQuestions).where(eq(quizQuestions.id, id)).limit(1);
+  return result.length > 0 ? result[0] : undefined;
+}
+
+export async function getUserProgress(userId: number): Promise<UserProgress[]> {
+  const db = await getDb();
+  if (!db) return [];
+  
+  return await db.select().from(userProgress).where(eq(userProgress.userId, userId));
+}
+
+export async function getUserProgressByTopic(userId: number, topicId: number): Promise<UserProgress | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+  
+  const result = await db.select().from(userProgress).where(
+    and(eq(userProgress.userId, userId), eq(userProgress.topicId, topicId))
+  ).limit(1);
+  return result.length > 0 ? result[0] : undefined;
+}
+
+export async function upsertUserProgress(data: InsertUserProgress): Promise<UserProgress> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  
+  const existing = await getUserProgressByTopic(data.userId, data.topicId);
+  
+  if (existing) {
+    await db.update(userProgress).set({
+      status: data.status,
+      completedAt: data.status === 'completed' ? new Date() : existing.completedAt,
+      updatedAt: new Date(),
+    }).where(eq(userProgress.id, existing.id));
+    
+    const updated = await db.select().from(userProgress).where(eq(userProgress.id, existing.id)).limit(1);
+    return updated[0]!;
+  } else {
+    await db.insert(userProgress).values(data);
+    const inserted = await db.select().from(userProgress).where(
+      and(eq(userProgress.userId, data.userId), eq(userProgress.topicId, data.topicId))
+    ).limit(1);
+    return inserted[0]!;
+  }
+}
+
+export async function getUserNotes(userId: number, topicId: number): Promise<UserNote | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+  
+  const result = await db.select().from(userNotes).where(
+    and(eq(userNotes.userId, userId), eq(userNotes.topicId, topicId))
+  ).limit(1);
+  return result.length > 0 ? result[0] : undefined;
+}
+
+export async function upsertUserNote(data: InsertUserNote): Promise<UserNote> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  
+  const existing = await getUserNotes(data.userId, data.topicId);
+  
+  if (existing) {
+    await db.update(userNotes).set({
+      content: data.content,
+      updatedAt: new Date(),
+    }).where(eq(userNotes.id, existing.id));
+    
+    const updated = await db.select().from(userNotes).where(eq(userNotes.id, existing.id)).limit(1);
+    return updated[0]!;
+  } else {
+    await db.insert(userNotes).values(data);
+    return data as any;
+  }
+}
+
+export async function deleteUserNote(userId: number, topicId: number): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  
+  const result = await db.delete(userNotes).where(
+    and(eq(userNotes.userId, userId), eq(userNotes.topicId, topicId))
+  );
+  return true;
+}
+
+export async function submitQuizAnswer(data: InsertQuizAnswer): Promise<QuizAnswer> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  
+  await db.insert(quizAnswers).values(data);
+  return data as any;
+}
+
+export async function getUserQuizAnswers(userId: number): Promise<QuizAnswer[]> {
+  const db = await getDb();
+  if (!db) return [];
+  
+  return await db.select().from(quizAnswers).where(eq(quizAnswers.userId, userId));
+}
